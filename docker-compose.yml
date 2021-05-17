@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    command: python /app/manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    expose: 
+      - 8000
+    environment:
+      - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
+    depends_on:
+      - db
+    labels: # new
+      - "traefik.enable=true"
+      - "traefik.http.routers.fastapi.rule=Host(`django.localhost`)"
+  db:
+    image: postgres:13-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    expose:
+      - 5432
+    environment:
+      - POSTGRES_USER=django_traefik
+      - POSTGRES_PASSWORD=django_traefik
+      - POSTGRES_DB=django_traefik
+  traefik: # new
+    image: traefik:v2.3
+    ports:
+      - 8008:80
+      - 8081:8080
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "$PWD/traefik.dev.toml:/etc/traefik/traefik.toml"
+
+volumes:
+  postgres_data:
