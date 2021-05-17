@@ -771,9 +771,9 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile.prod
-    command: gunicorn --bind 0.0.0.0:80 config.wsgi
+    command: gunicorn --bind 0.0.0.0:8000 config.wsgi
     expose:  # new
-      - 80
+      - 8000
     env_file:
       - ./.env.prod
     depends_on:
@@ -789,7 +789,7 @@ services:
       - postgres_data_prod:/var/lib/postgresql/data/
     env_file:
       - ./.env.prod.db
-  treafik:
+  traefik:
     build: 
       context: .
       dockerfile: Dockerfile.traefik
@@ -801,7 +801,7 @@ services:
       - "./traefik-public-certificates:/certificates"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`dashboard-django-traefik.yourdomain.com`) && (PathPrefix(`/`)"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard-django-traefik.yourdomain.com`)"
       - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.routers.dashboard.service=api@internal"
@@ -884,3 +884,7 @@ In terms of actual deployment to a production environment, you'll probably want 
 
 1. Fully-managed database service -- like [RDS](https://aws.amazon.com/rds/) or [Cloud SQL](https://cloud.google.com/sql/) -- rather than managing your own Postgres instance within a container.
 1. Non-root user for the services
+
+Do the following before deploying to production:
+1. Collect static files
+1. Add the production endpoint to `ALLOWED_HOSTS`
