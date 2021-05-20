@@ -1,6 +1,6 @@
 # Dockerizing Django with Postgres, Uvicorn, and Traefik
 
-In this tutorial, we look at how to set up Django with Postgres, Uvicorn, and Docker. For production environments, we'll add on Gunicorn, Traefik, and Let's Encrypt.
+In this tutorial, we'll look at how to set up Django with Postgres, Uvicorn, and Docker. For production environments, we'll add on Gunicorn, Traefik, and Let's Encrypt.
 
 ## Project Setup
 
@@ -8,28 +8,18 @@ Start by creating a project directory:
 
 ```sh
 $ mkdir django-docker-traefik && cd django-docker-traefik
+$ mkdir app && cd app
 $ python3.9 -m venv venv
 $ source venv/bin/activate
 ```
 
 > Feel free to swap out virtualenv and Pip for [Poetry](https://python-poetry.org/) or [Pipenv](https://pipenv.pypa.io/). For more, review [Modern Python Environments](/blog/python-environments/).
 
-Add [Django](https://www.djangoproject.com/) to *requirements.txt*:
-
-```
-Django==3.2.3
-```
-
-Install them:
+Next, let's install Django and create a simple Django application:
 
 ```sh
-(venv)$ pip install -r requirements.txt
-```
-
-Next, let's create a simple Django application:
-
-```bash
-(venv)$ django-admin startproject config .
+(venv)$ pip install django==3.2.3
+(venv)$ django-admin.py startproject config .
 (venv)$ python manage.py migrate
 ```
 
@@ -39,16 +29,36 @@ Run the application:
 (venv)$ python manage.py runserver
 ```
 
-Navigate to [127.0.0.1:8000](http://127.0.0.1:8000). You should see the django welcome page.
+Navigate to [http://localhost:8000/](http://localhost:8000/) to view the Django welcome screen. Kill the server and exit from the virtual environment once done. Delete the virtual environment as well. We now have a simple Django project to work with.
 
-Kill the server once done.
+Create a *requirements.txt* file in the "app" directory and add Django as a dependency:
+
+```
+Django==3.2.3
+```
+
+Since we'll be moving to Postgres, go ahead and remove the *db.sqlite3* file from the "app" directory.
+
+Your project directory should look like:
+
+```sh
+└── app
+    ├── config
+    │   ├── __init__.py
+    │   ├── asgi.py
+    │   ├── settings.py
+    │   ├── urls.py
+    │   └── wsgi.py
+    ├── manage.py
+    └── requirements.txt
+```
 
 ## Docker
 
-Install [Docker](https://docs.docker.com/install/), if you don't already have it, then add a *Dockerfile* to the project root:
+Install [Docker](https://docs.docker.com/install/), if you don't already have it, then add a *Dockerfile* to the "app" directory:
 
 ```Dockerfile
-# Dockerfile
+# app/Dockerfile
 
 # pull the official docker image
 FROM python:3.9.5-slim
@@ -68,7 +78,7 @@ RUN pip install -r requirements.txt
 COPY . .
 ```
 
-So, we started with a `slim` [Docker image](https://hub.docker.com/_/python/) for Python 3.9.4. We then set up a [working directory](https://docs.docker.com/engine/reference/builder/#workdir) along with two environment variables:
+So, we started with a `slim` [Docker image](https://hub.docker.com/_/python/) for Python 3.9.5. We then set up a [working directory](https://docs.docker.com/engine/reference/builder/#workdir) along with two environment variables:
 
 1. `PYTHONDONTWRITEBYTECODE`: Prevents Python from writing pyc files to disc (equivalent to `python -B` [option](https://docs.python.org/3/using/cmdline.html#id1))
 1. `PYTHONUNBUFFERED`: Prevents Python from buffering stdout and stderr (equivalent to `python -u` [option](https://docs.python.org/3/using/cmdline.html#cmdoption-u))
@@ -86,12 +96,14 @@ version: '3.8'
 
 services:
   web:
-    build: .
-    command: python /app/manage.py runserver 0.0.0.0:8000
+    build: ./app
+    command: python manage.py runserver 0.0.0.0:8000
     volumes:
-      - .:/app
+      - ./app:/app
     ports:
       - 8008:8000
+    environment:
+      - DEBUG=1
 ```
 
 > Review the [Compose file reference](https://docs.docker.com/compose/compose-file/) for info on how this file works.
@@ -114,7 +126,7 @@ Navigate to [http://localhost:8008](http://localhost:8008) to again view the wel
 
 ## Postgres
 
-To configure Postgres, we need to add a new service to the *docker-compose.yml* file, set up an ORM, and install [asyncpg](https://github.com/MagicStack/asyncpg).
+To configure Postgres, we'll need to add a new service to the *docker-compose.yml* file, update the Django settings, and install [Psycopg2](http://initd.org/psycopg/).
 
 First, add a new service called `db` to *docker-compose.yml*:
 
@@ -125,13 +137,14 @@ version: '3.8'
 
 services:
   web:
-    build: .
-    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; command: python /app/manage.py runserver 0.0.0.0:8000'
+    build: ./app
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; python manage.py runserver 0.0.0.0:8000'
     volumes:
-      - .:/app
+      - ./app:/app
     ports:
       - 8008:8000
     environment:
+      - DEBUG=1
       - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
     depends_on:
       - db
@@ -159,90 +172,52 @@ We also added an environment key to define a name for the default database and s
 Take note of the new command in the `web` service:
 
 ```sh
-bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; python /app/manage.py runserver 0.0.0.0:8000'
+bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; python manage.py runserver 0.0.0.0:8000'
 ```
 
 `while !</dev/tcp/db/5432; do sleep 1` will continue until Postgres is up. Once up, `python /app/manage.py runserver 0.0.0.0:8000` runs.
 
-Let's setup the django postgres connection, add [django-environ](https://django-environ.readthedocs.io/en/latest/), to load/read environment variables and [psycopg2](https://github.com/psycopg/psycopg2), a postgres driver for python:
+To configure Postgres, add [django-environ](https://django-environ.readthedocs.io/en/latest/), to load/read environment variables, and [Psycopg2](https://github.com/psycopg/psycopg2) to *requirements.txt*:
 
-```text
+```
+Django==3.2.3
 django-environ==0.4.5
 psycopg2-binary==2.8.6
 ```
 
+Initialize environ at the top of *config/settings.py*:
+
 ```python
 # config/settings.py
 
-# read the environment variables
 import environ
-env = environ.Env()
 
-# setup the connection
+env = environ.Env()
+```
+
+Then, update the `DATABASES` dict:
+
+```python
+# config/settings.py
+
 DATABASES = {
-    "default": env.db(),
+    'default': env.db(),
 }
 ```
 
-Django-environ automatically parses the database connection url strings like `psql://user:pass@127.0.0.1:8458/db`.
+django-environ will automatically parse the database connection URL string that we added to *docker-compose.yml*:
 
-Next, we will create a new [django-admin command](https://docs.djangoproject.com/en/3.2/howto/custom-management-commands/) to create a dummy entry into our database. 
-
-Create a new app:
-
-```bash
-(venv)$ python manage.py startapp users
+```
+DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
 ```
 
-Add the newly created app to `INSTALLED_APPS`:
+Update the `DEBUG` variables as well:
 
 ```python
 # config/settings.py
 
-INSTALLED_APPS = [
-    ...
-    "users",
-]
+DEBUG = env('DEBUG')
 ```
-
-Create a new file, `users/management/commands/create_user.py`, maintaining the following structure.
-
-```bash
-users
-├── __init__.py
-├── admin.py
-├── apps.py
-├── management
-│   ├── __init__.py
-│   └── commands
-│       ├── __init__.py
-│       └── create_user.py
-├── migrations
-│   └── __init__.py
-├── models.py
-├── tests.py
-└── views.py
-```
-
-```python
-# users/management/commands/create_user.py
-
-from django.core.management.base import BaseCommand
-from django.contrib.auth.models import User
-from typing import Any, Optional
-
-
-class Command(BaseCommand):
-    def handle(self, *args: Any, **options: Any) -> Optional[str]:
-        User.objects.get_or_create(email="test@test.com")
-        self.stdout.write(self.style.SUCCESS("User added"))
-```
-
-```python
-User.objects.get_or_create(email="test@test.com")
-```
-
-The above line in the handle function adds a dummy entry to our table once we issue the command `python manage.py create_user`. `get_or_create` makes sure that the entry is created only if it doesn't already exist.
 
 Build the new image and spin up the two containers:
 
@@ -251,14 +226,77 @@ $ docker-compose up -d --build
 ```
 
 Run the initial migration:
+
 ```bash
-$ docker-compose exec web python /app/manage.py migrate
+$ docker-compose exec web python manage.py migrate --noinput
 ```
 
-Create the dummy entry:
-```bash
-$ docker-compose exec web python /app/manage.py create_user
-User added
+Ensure the default Django tables were created:
+
+```sh
+$ docker-compose exec db psql --username=django_traefik --dbname=django_traefik
+
+psql (13.2)
+Type "help" for help.
+
+django_traefik=# \l
+                                            List of databases
+      Name      |     Owner      | Encoding |  Collate   |   Ctype    |         Access privileges
+----------------+----------------+----------+------------+------------+-----------------------------------
+ django_traefik | django_traefik | UTF8     | en_US.utf8 | en_US.utf8 |
+ postgres       | django_traefik | UTF8     | en_US.utf8 | en_US.utf8 |
+ template0      | django_traefik | UTF8     | en_US.utf8 | en_US.utf8 | =c/django_traefik                +
+                |                |          |            |            | django_traefik=CTc/django_traefik
+ template1      | django_traefik | UTF8     | en_US.utf8 | en_US.utf8 | =c/django_traefik                +
+                |                |          |            |            | django_traefik=CTc/django_traefik
+(4 rows)
+
+django_traefik=# \c django_traefik
+You are now connected to database "django_traefik" as user "django_traefik".
+
+django_traefik=# \dt
+                      List of relations
+ Schema |            Name            | Type  |     Owner
+--------+----------------------------+-------+----------------
+ public | auth_group                 | table | django_traefik
+ public | auth_group_permissions     | table | django_traefik
+ public | auth_permission            | table | django_traefik
+ public | auth_user                  | table | django_traefik
+ public | auth_user_groups           | table | django_traefik
+ public | auth_user_user_permissions | table | django_traefik
+ public | django_admin_log           | table | django_traefik
+ public | django_content_type        | table | django_traefik
+ public | django_migrations          | table | django_traefik
+ public | django_session             | table | django_traefik
+(10 rows)
+
+django_traefik=# \q
+```
+
+You can check that the volume was created as well by running:
+
+```sh
+$ docker volume inspect django-docker-traefik_postgres_data
+```
+
+You should see something similar to:
+
+```sh
+[
+    {
+        "CreatedAt": "2021-05-20T01:01:34Z",
+        "Driver": "local",
+        "Labels": {
+            "com.docker.compose.project": "django-docker-traefik",
+            "com.docker.compose.version": "1.29.1",
+            "com.docker.compose.volume": "postgres_data"
+        },
+        "Mountpoint": "/var/lib/docker/volumes/django-docker-traefik_postgres_data/_data",
+        "Name": "django-docker-traefik_postgres_data",
+        "Options": null,
+        "Scope": "local"
+    }
+]
 ```
 
 The `User` model is the default model for representing a user, provided by the django-admin. The associated table(`auth_user`) and fields are created upon initial migration.
@@ -289,103 +327,18 @@ You should see something similar to:
 ]
 ```
 
-Next, create a new file, `entrypoint.sh` to do the following:
-1. Wait for the postgres connection.
-1. Create the initial migration.
-1. Create the dummy user.
-
-```bash
-#!/bin/sh
-
-echo "Waiting for postgres..."
-
-while ! nc -z db 5432; do
-    sleep 0.1
-done
-
-echo "PostgreSQL started"
-
-python $APP_HOME/manage.py migrate
-python $APP_HOME/manage.py create_user
-
-exec "$@"
-```
-
-The value for `$APP_HOME` will be set in the Dockerfile.
-
-Update the file permissions locally:
-```bash
-chmod +x entrypoint.sh
-```
-
-Then, update the Dockerfile to install [Netcat](http://netcat.sourceforge.net/), copy over the entrypoint.sh file, and run the file as the Docker [entrypoint](https://docs.docker.com/engine/reference/builder/#entrypoint) command:
-
-```dockerfile
-# pull the official docker image
-FROM python:3.9.5-slim
-
-# set app path
-ENV APP_HOME=/app
-
-# set work directory
-WORKDIR ${APP_HOME}
-
-# set env variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-# install system dependencies
-RUN apt-get update && apt-get install -y netcat
-
-# install dependencies
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-# copy project
-COPY . .
-
-
-ENTRYPOINT ["/app/entrypoint.sh"]
-```
-
-Finally, modify the command for the `web` service in _docker-compose.yml_ file.
-
-```yaml
-command: python /app/manage.py runserver 0.0.0.0:8000
-```
-
-Test it out again:
-1. Re-build the images
-1. Run the containers
-1. Try [http://127.0.0.1:8008](http://127.0.0.1:8008)
-
-Checkout the database entry:
-```bash
-$ docker-compose exec db psql --username=django_traefik --dbname=django_traefik
-
-psql (13.3)
-Type "help" for help.
-
-django_traefik=# \c django_traefik
-You are now connected to database "django_traefik" as user "django_traefik".
-django_traefik=# select * from auth_user;
- id | password | last_login | is_superuser | username | first_name | last_name |     email     | is_staff | is_active |          date_joined
-----+----------+------------+--------------+----------+------------+-----------+---------------+----------+-----------+-------------------------------
-  1 |          |            | f            |          |            |           | test@test.com | f        | t         | 2021-05-17 09:27:29.131359+00
-(1 row)
-
-django_traefik=# \q
-```
-
 ## Gunicorn
 
 Moving along, for production environments, let's add [Gunicorn](https://gunicorn.org/), a production-grade WSGI server, to the requirements file:
 
-```text
+```
+Django==3.2.3
+django-environ==0.4.5
 gunicorn==20.1.0
+psycopg2-binary==2.8.6
 ```
 
-Since we still want to use Django's built-in server in development, create a new compose file called _docker-compose.prod.yml_ for production:
+Since we still want to use Django's built-in server in development, create a new compose file called *docker-compose.prod.yml* for production:
 
 ```yaml
 # docker-compose.prod.yml
@@ -394,20 +347,25 @@ version: '3.8'
 
 services:
   web:
-    build: .
-    command: gunicorn --bind 0.0.0.0:8000 config.wsgi
+    build: ./app
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; gunicorn --bind 0.0.0.0:8000 config.wsgi'
     ports:
       - 8008:8000
-    env_file:
-      - ./.env.prod
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
     depends_on:
       - db
   db:
     image: postgres:13-alpine
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data/
-    env_file:
-      - ./.env.prod.db
+    expose:
+      - 5432
+    environment:
+      - POSTGRES_USER=django_traefik
+      - POSTGRES_PASSWORD=django_traefik
+      - POSTGRES_DB=django_traefik
 
 volumes:
   postgres_data_prod:
@@ -415,22 +373,7 @@ volumes:
 
 > If you have multiple environments, you may want to look at using a [docker-compose.override.yml](https://docs.docker.com/compose/extends/) configuration file. With this approach, you'd add your base config to a docker-compose.yml file and then use a docker-compose.override.yml file to override those config settings based on the environment.
 
-Take note of the default `command`. We're running Gunicorn rather than the Flask development server. We also removed the volume from the `web` service since we don't need it in production. Finally, we're using [separate environment variable files](https://docs.docker.com/compose/env-file/) to define environment variables for both services that will be passed to the container at runtime.
-
-_.env.prod_:
-
-```text
-DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
-```
-
-_.env.prod.db_:
-```text
-POSTGRES_USER=django_traefik
-POSTGRES_PASSWORD=django_traefik
-POSTGRES_DB=django_traefik
-```
-
-Add the two files to the project root. You'll probably want to keep them out of version control, so add them to a _.gitignore_ file.
+Take note of the default `command`. We're running Gunicorn rather than the Django development server. We also removed the volume from the `web` service since we don't need it in production.
 
 Bring [down](https://docs.docker.com/compose/reference/down/) the development containers (and the associated volumes with the -v flag):
 
@@ -444,16 +387,22 @@ Then, build the production images and spin up the containers:
 $ docker-compose -f docker-compose.prod.yml up -d --build
 ```
 
-Verify the dummy entry is created. Test out [http://127.0.0.1:8008](http://127.0.0.1:8008)
+Run the migrations:
 
-> If the container fails to start, check for errors in the logs via `docker-compose -f docker-compose.prod.yml logs -f`.
+```sh
+$ docker-compose -f docker-compose.prod.yml exec web python manage.py migrate --noinput
+```
+
+Verify that the `django_traefik` database was created along with the default Django tables. Test out the admin page at [http://localhost:8008/admin](http://localhost:8008/admin). The static files are not being loaded correctly. This is expected. We'll fix this shortly.
+
+> Again, if the container fails to start, check for errors in the logs via `docker-compose -f docker-compose.prod.yml logs -f`.
 
 ## Production Dockerfile
 
 Create a new Dockerfile called *Dockerfile.prod* for use with production builds:
 
 ```Dockerfile
-# Dockerfile.prod
+# app/Dockerfile.prod
 
 ###########
 # BUILDER #
@@ -504,14 +453,10 @@ RUN mkdir $APP_HOME
 WORKDIR $APP_HOME
 
 # install dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends netcat
 COPY --from=builder /usr/src/app/wheels /wheels
 COPY --from=builder /app/requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache /wheels/*
-
-# copy entrypoint.sh
-COPY ./entrypoint.sh $APP_HOME
 
 # copy project
 COPY . $APP_HOME
@@ -521,9 +466,6 @@ RUN chown -R app:app $APP_HOME
 
 # change to the app user
 USER app
-
-# run entrypoint.prod.sh
-ENTRYPOINT ["/home/app/web/entrypoint.sh"]
 ```
 
 Here, we used a Docker [multi-stage build](https://docs.docker.com/develop/develop-images/multistage-build/) to reduce the final image size. Essentially, `builder` is a temporary image that's used for building the Python wheels. The wheels are then copied over to the final production image and the `builder` image is discarded.
@@ -532,27 +474,29 @@ Here, we used a Docker [multi-stage build](https://docs.docker.com/develop/devel
 
 Did you notice that we created a non-root user? By default, Docker runs container processes as root inside of a container. This is a bad practice since attackers can gain root access to the Docker host if they manage to break out of the container. If you're root in the container, you'll be root on the host.
 
-Update the web service within the _docker-compose.prod.yml_ file to build with Dockerfile.prod:
+Update the `web` service within the *docker-compose.prod.yml* file to build with *Dockerfile.prod*:
 
 ```yaml
 web:
-  build: 
-    context: .
+  build:
+    context: ./app
     dockerfile: Dockerfile.prod
-  command: gunicorn --bind 0.0.0.0:8000 config.wsgi
+  command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; gunicorn --bind 0.0.0.0:8000 config.wsgi'
   ports:
     - 8008:8000
-  env_file:
-    - ./.env.prod
+  environment:
+    - DEBUG=0
+    - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
   depends_on:
     - db
 ```
 
 Try it out:
 
-```bash
+```sh
 $ docker-compose -f docker-compose.prod.yml down -v
 $ docker-compose -f docker-compose.prod.yml up -d --build
+$ docker-compose -f docker-compose.prod.yml exec web python manage.py migrate --noinput
 ```
 
 ## Traefik
@@ -615,13 +559,14 @@ version: '3.8'
 
 services:
   web:
-    build: .
-    command: python /app/manage.py runserver 0.0.0.0:8000
+    build: ./app
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; python manage.py runserver 0.0.0.0:8000'
     volumes:
-      - .:/app
-    expose: 
+      - ./app:/app
+    expose:  # new
       - 8000
     environment:
+      - DEBUG=1
       - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
     depends_on:
       - db
@@ -658,7 +603,7 @@ First, the `web` service is only exposed to other containers on port `8000`. We 
 
 Take note of the volumes within the `traefik` service:
 
-1. `./traefik.dev.toml:/etc/traefik/traefik.toml` maps the local config file to the config file in the container so that the settings are kept in sync
+1. `/traefik.dev.toml:/etc/traefik/traefik.toml"` maps the local config file to the config file in the container so that the settings are kept in sync
 1. `/var/run/docker.sock:/var/run/docker.sock:ro` enables traefik to discover other containers
 
 To test, first bring down any existing containers:
@@ -689,11 +634,11 @@ $ docker-compose down -v
 
 ## Let's Encrypt
 
-We've successfully created a working example of Fastapi, Docker, and Traefik in development mode. For production, you'll want to configure Traefik to [manage TLS certificates via Let's Encrypt](https://doc.traefik.io/traefik/https/acme/). In short, Traefik will automatically contact the certificate authority to issue and renew certificates.
+We've successfully created a working example of Django, Docker, and Traefik in development mode. For production, you'll want to configure Traefik to [manage TLS certificates via Let's Encrypt](https://doc.traefik.io/traefik/https/acme/). In short, Traefik will automatically contact the certificate authority to issue and renew certificates.
 
 Since Let's Encrypt won't issue certificates for `localhost`, you'll need to spin up your production containers on a cloud compute instance (like a [DigitalOcean](https://m.do.co/c/d8f211a4b4c2) droplet or an AWS EC2 instance). You'll also need a valid domain name. If you don't have one, you can create a free domain at [Freenom](https://www.freenom.com/).
 
-> We used a [DigitalOcean](https://m.do.co/c/d8f211a4b4c2) droplet along with Docker machine to quickly provision a compute instance with Docker and deployed the production containers to test out the Traefik config. Check out [DigitalOcean example](https://docs.docker.com/machine/examples/ocean/) from the Docker docs for more on using Docker Machine to provision a droplet.
+> We used a [DigitalOcean](https://m.do.co/c/d8f211a4b4c2) droplet along with Docker machine to quickly provision a compute instance with Docker and deployed the production containers to test out the Traefik config. Check out the [DigitalOcean example](https://docs.docker.com/machine/examples/ocean/) from the Docker docs for more on using Docker Machine to provision a droplet.
 
 Assuming you configured a compute instance and set up a free domain, you're now ready to set up Traefik in production mode.
 
@@ -754,8 +699,8 @@ This is where the Let's Encrypt config lives. We defined where the certificates 
 
 Next, assuming you updated your domain name's DNS records, create two new A records that both point at your compute instance's public IP:
 
-1. `fastapi-traefik.your-domain.com` - for the web service
-1. `dashboard-fastapi-traefik.your-domain.com` - for the Traefik dashboard
+1. `django-traefik.your-domain.com` - for the web service
+1. `dashboard-django-traefik.your-domain.com` - for the Traefik dashboard
 
 > Make sure to replace `your-domain.com` with your actual domain.
 
@@ -768,14 +713,16 @@ version: '3.8'
 
 services:
   web:
-    build: 
-      context: .
+    build:
+      context: ./app
       dockerfile: Dockerfile.prod
-    command: gunicorn --bind 0.0.0.0:8000 config.wsgi
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; gunicorn --bind 0.0.0.0:8000 config.wsgi'
     expose:  # new
       - 8000
-    env_file:
-      - ./.env.prod
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
+      - DJANGO_ALLOWED_HOSTS=.your-domain.com
     depends_on:
       - db
     labels:  # new
@@ -787,13 +734,17 @@ services:
     image: postgres:13-alpine
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data/
-    env_file:
-      - ./.env.prod.db
-  traefik:
-    build: 
+    expose:
+      - 5432
+    environment:
+      - POSTGRES_USER=django_traefik
+      - POSTGRES_PASSWORD=django_traefik
+      - POSTGRES_DB=django_traefik
+  traefik:  # new
+    build:
       context: .
       dockerfile: Dockerfile.traefik
-    ports: 
+    ports:
       - 80:80
       - 443:443
     volumes:
@@ -807,7 +758,6 @@ services:
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=auth"
       - "traefik.http.middlewares.auth.basicauth.users=testuser:$$apr1$$jIKW.bdS$$eKXe4Lxjgy/rH65wP1iQe1"
-  
 
 volumes:
   postgres_data_prod:
@@ -847,8 +797,16 @@ testuser:$$apr1$$jIKW.bdS$$eKXe4Lxjgy/rH65wP1iQe1
 Feel free to use an `env_file` to store the username and password as environment variables
 
 ```
-USERNAME=testiser
+USERNAME=testuser
 HASHED_PASSWORD=$$apr1$$jIKW.bdS$$eKXe4Lxjgy/rH65wP1iQe1
+```
+
+Next, update the `ALLOWED_HOSTS` environment variable in *config/settings.py* like so:
+
+```python
+# config/settings.py
+
+ALLOWED_HOSTS = env('DJANGO_ALLOWED_HOSTS', default=[])
 ```
 
 Finally, add a new Dockerfile called *Dockerfile.traefik*:
@@ -870,11 +828,72 @@ $ docker-compose -f docker-compose.prod.yml up -d --build
 Ensure the two URLs work:
 
 1. [https://django-traefik.youdomain.com](https://django-traefik.youdomain.com)
-1. [https://dashboard-django-traefik.youdomain.com/dashboard](https://dashboard-django-traefik.youdomain.com/dashboard)
+1. [https://dashboard-django-traefik.youdomain.com/dashboard/](https://dashboard-django-traefik.youdomain.com/dashboard/)
 
 Also, make sure that when you access the HTTP versions of the above URLs, you're redirected to the HTTPS versions.
 
 Finally, Let's Encrypt certificates have a validity of [90 days](https://letsencrypt.org/2015/11/09/why-90-days.html). Treafik will automatically handle renewing the certificates for you behind the scenes, so that's one less thing you'll have to worry about!
+
+## Static Files
+
+Since Traefik doesn't serve static files, we'll use [WhiteNoise](http://whitenoise.evans.io) to manage the static assets.
+
+First add the package to the *requirements.txt* file:
+
+```
+Django==3.2.3
+django-environ==0.4.5
+gunicorn==20.1.0
+psycopg2-binary==2.8.6
+whitenoise==5.2.0
+```
+
+Update the middleware in *config/settings.py* like so:
+
+```python
+# config/settings.py
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # new
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+```
+
+Then configure the handling of your staticfiles with `STATIC_ROOT`:
+
+```python
+# config/settings.py
+
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+```
+
+FInally, add compression and caching support:
+
+```python
+# config/settings.py
+
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+```
+
+To test, update the imgaes and containers:
+
+```sh
+$ docker-compose -f docker-compose.prod.yml up -d --build
+```
+
+Collect the static files:
+
+```sh
+$ docker-compose -f docker-compose.prod.yml exec web python manage.py collectstatic
+```
+
+Ensure the static files are being served correctly at [https://django-traefik.youdomain.com/admin](https://django-traefik.youdomain.com/admin).
 
 ## Conclusion
 
@@ -885,6 +904,4 @@ In terms of actual deployment to a production environment, you'll probably want 
 1. Fully-managed database service -- like [RDS](https://aws.amazon.com/rds/) or [Cloud SQL](https://cloud.google.com/sql/) -- rather than managing your own Postgres instance within a container.
 1. Non-root user for the services
 
-Do the following before deploying to production:
-1. Collect static files
-1. Add the production endpoint to `ALLOWED_HOSTS`
+You can find the code in the [django-docker-traefik](https://github.com/testdrivenio/django-docker-traefik) repo.
