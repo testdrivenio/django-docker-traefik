@@ -1,33 +1,41 @@
+# docker-compose.prod.yml
+
 version: '3.8'
 
 services:
   web:
-    build: 
-      context: .
+    build:
+      context: ./app
       dockerfile: Dockerfile.prod
-    command: gunicorn --bind 0.0.0.0:8000 config.wsgi
-    expose:  # new
+    command: bash -c 'while !</dev/tcp/db/5432; do sleep 1; done; gunicorn --bind 0.0.0.0:8000 config.wsgi'
+    expose:
       - 8000
-    env_file:
-      - ./.env.prod
+    environment:
+      - DEBUG=0
+      - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
+      - DJANGO_ALLOWED_HOSTS=.michaelherman.io
     depends_on:
       - db
-    labels:  # new
+    labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.django.rule=Host(`django-traefik.yourdomain.com`)"
+      - "traefik.http.routers.django.rule=Host(`django-traefik.michaelherman.io`)"
       - "traefik.http.routers.django.tls=true"
       - "traefik.http.routers.django.tls.certresolver=letsencrypt"
   db:
     image: postgres:13-alpine
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data/
-    env_file:
-      - ./.env.prod.db
+    expose:
+      - 5432
+    environment:
+      - POSTGRES_USER=django_traefik
+      - POSTGRES_PASSWORD=django_traefik
+      - POSTGRES_DB=django_traefik
   traefik:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.traefik
-    ports: 
+    ports:
       - 80:80
       - 443:443
     volumes:
@@ -35,13 +43,12 @@ services:
       - "./traefik-public-certificates:/certificates"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`dashboard-django-traefik.yourdomain.com`)"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard-django-traefik.michaelherman.io`)"
       - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=auth"
       - "traefik.http.middlewares.auth.basicauth.users=testuser:$$apr1$$jIKW.bdS$$eKXe4Lxjgy/rH65wP1iQe1"
-  
 
 volumes:
   postgres_data_prod:

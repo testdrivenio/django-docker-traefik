@@ -1,3 +1,5 @@
+# app/Dockerfile.prod
+
 ###########
 # BUILDER #
 ###########
@@ -47,14 +49,10 @@ RUN mkdir $APP_HOME
 WORKDIR $APP_HOME
 
 # install dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends netcat
 COPY --from=builder /usr/src/app/wheels /wheels
 COPY --from=builder /app/requirements.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache /wheels/*
-
-# copy entrypoint.sh
-COPY ./entrypoint.sh $APP_HOME
 
 # copy project
 COPY . $APP_HOME
@@ -64,6 +62,3 @@ RUN chown -R app:app $APP_HOME
 
 # change to the app user
 USER app
-
-# run entrypoint.prod.sh
-ENTRYPOINT ["/home/app/web/entrypoint.sh"]

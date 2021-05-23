@@ -1,3 +1,5 @@
+# traefik.prod.toml
+
 [entryPoints]
   [entryPoints.web]
     address = ":80"
@@ -20,7 +22,7 @@ dashboard = true
     exposedByDefault = false
 
 [certificatesResolvers.letsencrypt.acme]
-  email = "your@email.com"
+  email = "michael@testdriven.io"
   storage = "/certificates/acme.json"
   [certificatesResolvers.letsencrypt.acme.httpChallenge]
     entryPoint = "web"
