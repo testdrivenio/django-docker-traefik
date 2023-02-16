@@ -1,7 +1,7 @@
 # app/Dockerfile
 
 # pull the official docker image
-FROM python:3.9.5-slim
+FROM python:3.11-slim
 
 # set work directory
 WORKDIR /app
