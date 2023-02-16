@@ -1,5 +1,3 @@
-# docker-compose.prod.yml
-
 version: '3.8'
 
 services:
@@ -13,12 +11,12 @@ services:
     environment:
       - DEBUG=0
       - DATABASE_URL=postgresql://django_traefik:django_traefik@db:5432/django_traefik
-      - DJANGO_ALLOWED_HOSTS=.michaelherman.io
+      - DJANGO_ALLOWED_HOSTS=.your-domain.com
     depends_on:
       - db
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.django.rule=Host(`django-traefik.michaelherman.io`)"
+      - "traefik.http.routers.django.rule=Host(`django-traefik.your-domain.com`)"
       - "traefik.http.routers.django.tls=true"
       - "traefik.http.routers.django.tls.certresolver=letsencrypt"
   db:
@@ -43,7 +41,7 @@ services:
       - "./traefik-public-certificates:/certificates"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.rule=Host(`dashboard-django-traefik.michaelherman.io`)"
+      - "traefik.http.routers.dashboard.rule=Host(`dashboard-django-traefik.your-domain.com`)"
       - "traefik.http.routers.dashboard.tls=true"
       - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.routers.dashboard.service=api@internal"
