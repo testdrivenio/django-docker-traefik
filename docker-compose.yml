@@ -32,7 +32,7 @@ services:
       - 8008:80
       - 8081:8080
     volumes:
-      - "$PWD/traefik.dev.toml:/etc/traefik/traefik.toml"
+      - "./traefik.dev.toml:/etc/traefik/traefik.toml"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
 
 volumes:
